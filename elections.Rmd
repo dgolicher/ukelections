@@ -1,0 +1,105 @@
+---
+title: "Mapping election results"
+author: "Duncan Golicher"
+date: "10/05/2015"
+output: html_document
+---
+
+# Getting the data
+
+The data have been scraped from the BBC website by Kieran Healey. The following line clones his github repository.
+
+git clone https://github.com/kjhealy/uk-elections.git
+
+```{r,message=FALSE,warning=FALSE}
+rm(list=ls())
+library(rgdal)
+map <- readOGR("maps/topo_wpc.json", "wpc")
+constituency_names.df<-read.csv("data/constituency_names.csv")
+ind <- match(map@data$id, constituency_names.df$id)
+map@data$name <- constituency_names.df$Constituency[ind]
+map@proj4string<-CRS("+init=epsg:4326")
+writeOGR(map,"data","constituencies_UK","ESRI Shapefile",over=TRUE)
+```
+
+
+
+```{r}
+#map<-readOGR("data","constituencies")
+dd<-map@data
+dd$order<-as.numeric(row.names(dd)) # Need this later to make sure the polygons and the data frame line up.
+plot(map)
+```
+
+
+```{r}
+
+library(reshape)
+d<-read.csv("data/uk-election-results-2015.csv")
+#write.csv(d,"data/election-results.csv",row.names=F)
+d$Party.all[d$Candidate == "John Bercow"] <- "Conservative"
+d$Party[d$Candidate == "John Bercow"] <- "Conservative"
+
+d<-d[d$Party.all%in%c("Conservative","Labour","Liberal Democrat","Green Party","UKIP","Plaid Cymru","Scottish National Party"),]
+d<-d[d$Region!="Northern Ireland",]
+d<-droplevels(d)
+d<-d[order(d$Constituency),]
+
+
+```
+
+## Calculate the ranks 
+
+```{r}
+d$rank<-unlist(tapply(-d$Votes,d$Constituency,order))
+
+win<-subset(d, rank==1)
+win<-win[,2:3]
+names(win)<-c("Constituency","Winner")
+second<-subset(d, rank==2)
+second<-second[,2:3]
+names(second)<-c("Constituency","Second")
+
+```
+
+## Merge it all together
+
+```{r}
+ds<-melt(d,id=c(2,3,4),m=6)
+d1<-cast(ds,Constituency~Party,sum)
+d1<-merge(d1,win,by.x="Constituency",by.y="Constituency")
+d1<-merge(d1,second,by.x="Constituency",by.y="Constituency")
+d1<-merge(dd,d1,by.x="name",by.y="Constituency",sort=TRUE)
+d1<-d1[order(d1$order),]
+row.names(d1)<-d1$order
+names(d1)
+names(d1)<-c("name","id","order","Con","Green","Lab","LibDem","Plaid","SNP","UKIP","Win","Second")
+map@data<-d1
+writeOGR(map,"data","percent-votes",driver="ESRI Shapefile",over=TRUE)
+
+```
+
+
+```{r}
+ds<-melt(d,id=c(2,3,4),m=5)
+d1<-cast(ds,Constituency~Party,sum)
+d1<-merge(d1,win,by.x="Constituency",by.y="Constituency")
+d1<-merge(d1,second,by.x="Constituency",by.y="Constituency")
+d1<-merge(dd,d1,by.x="name",by.y="Constituency",sort=TRUE)
+d1<-d1[order(d1$order),]
+row.names(d1)<-d1$order
+names(d1)
+names(d1)<-c("name","id","order","Con","Green","Lab","LibDem","Plaid","SNP","UKIP","Win","Second")
+map@data<-d1
+writeOGR(map,"data","number-votes",driver="ESRI Shapefile",over=TRUE)
+
+```
+
+
+Now upload zipped shapefile to CartoDB
+
+File available here.
+
+https://dgolicher.cartodb.com/tables/percent_votes/table
+
+
